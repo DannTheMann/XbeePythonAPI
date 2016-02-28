@@ -21,8 +21,8 @@ class StatusPacket:
         # 15 - len-1 payload
         self.success = self.rawPacket[8]
  
-    def getSource(self):
-        return self.source
+	def getSource(self):
+		return self.source
  
     def getSuccess(self):
         return self.success
@@ -65,11 +65,11 @@ class MessagePacket:
         else:
             self.payload.extend(packet[15:len(packet)-1])
         self._incrementedFrameID()
-        if self.end == True:
+        #if self.end == True:
         	#print "Ended:",self.getPayloadAsString()
  
-    def getSource(self):
-        return self.source
+	def getSource(self):
+		return self.source
  
     def getPayload(self):
         return self.payload
@@ -417,7 +417,7 @@ class XbeeAPI:
  
                 #print "\r\n"
         except KeyboardInterrupt:
-            #print "Exiting read thread..."
+            print "Exiting read thread..."
                  
  
     def _checkSum(self, packet):
@@ -480,10 +480,11 @@ class XbeeAPI:
 
         result = self.sendMessage("broadcast", "HB#") # (HB=HeartBeat)Send broadcast and wait for any devices to talk back...
         while not result == 0:
-			#print "Broadcast failed! Retrying in 10 seconds..."
+			print "Broadcast failed! Retrying in 10 seconds..."
 			time.sleep(10) # wait ten seconds
 			self.sendMessage("broadcast", "HB#") 
         time.sleep(3)
+        print "Sent broadcast... saving any newly found node."
         f = open(self.DESTINATION_NODES_FILE, 'a')
         for rxPacket in self.receivedMessages: # Loop through all received packets within the last 3 seconds
             if not rxPacket.getPayloadAsString and rxPacket.getPayloadAsString.startswith("HB#"): # If the packet was a heartbeat response
