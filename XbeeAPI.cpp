@@ -13,15 +13,19 @@
 XbeeAPI::XbeeAPI(HardwareSerial *pserial, int pin, const char* name) : name(name)
 {
   serial = pserial;
-  serial->begin(9600);
+  //serial->begin(9600);
+  serial->println("Hello...");
   serial->setTimeout(1000);
 }
 
 #define MAX_TRANSMIT_RF_DATA 72
 
-uint8_t XbeeAPI::sendMessage(unsigned char* message)
+uint8_t XbeeAPI::sendMessage(char* message)
 {
-   int len = strlen((char*)message);
+   serial->print("Sending: ");
+   serial->println(message);
+
+   int len = strlen(message);
    unsigned char framesNeeded = len / 72;
    if ( len > 72 && len < 144){
       framesNeeded++;
@@ -33,25 +37,34 @@ uint8_t XbeeAPI::sendMessage(unsigned char* message)
       return 3; // Too large a message
    }
 
+   serial->print("Len:");
+   serial->print(len);
+   serial->print(" FramesNeeded: ");
+   serial->println(framesNeeded);
+
    unsigned char frame[150];
    unsigned char escapedFrame[200];
 
    for (int i = 0; i < framesNeeded; i++){
 
-      int escapedLen = produceFrame(escapedFrame, frame, message, len, i);
+      serial->print("Producing frame... ");
+      serial->println(i);
+      int escapedLen = produceFrame(escapedFrame, frame, (unsigned char*)message, len, i);
 
+      serial->print("Printing escaped frame... ");
+      serial->println(escapedLen);
       serial->write(escapedFrame, escapedLen);
       // Clear both char arrays with 0's
       memset(frame, 0, 150);
       memset(escapedFrame, 0, 200);
       delay(250);
 
-      if (txstatus != NULL && txstatus->wasSuccessful())
-        continue;
-      else{
-        i--;
-        continue;
-      }
+      //if (txstatus != NULL && txstatus->wasSuccessful())
+      //  continue;
+      //else{
+      //  i--;
+      //  continue;
+      //}
 
    }
 
@@ -92,26 +105,38 @@ int XbeeAPI::produceFrame(unsigned char* escapedFrame, unsigned char* frame, uns
       // RF Data
       frame[16] = id; // Unique Frame ID
       int length = (id+1) * MAX_TRANSMIT_RF_DATA;
-      bool final = false;
+      //bool final = false;
       if(length >= len){
-        final = true;
+        //final = true;
         length = len;
       }
+
+      frame[2] = length+15;
 
       int k = 17;
       for(int j = id * MAX_TRANSMIT_RF_DATA; j < length; j++){
           frame[k++] = message[j];
+          serial->print("Writing: ");
+          serial->println(frame[k-1]);
+          if(j == len-1){
+            serial->println("Final: !");
+            frame[2]++;
+            frame[k++] = '!';
+            break;
+          }
       }
 
-      if(final){
-        frame[k++] = '!';
-      }
+      // if(final){
+      //   frame[k++] = '!';
+      // }
 
-      int checksum = 0;
+      unsigned char checksum = 0;
       for(int i = 3; i < k; i++){
           checksum+=frame[i];
       }
       frame[k] = checksum;
+      serial->print("Checksum: ");
+      serial->println(checksum);
 
       return escape(frame, escapedFrame);
   
@@ -119,7 +144,7 @@ int XbeeAPI::produceFrame(unsigned char* escapedFrame, unsigned char* frame, uns
 
 #define INPUT_SIZE 200
 
-void XbeeAPI::poll()
+bool XbeeAPI::poll()
 {
 
     unsigned char input[INPUT_SIZE + 1]; // Total length of data expected, including + 1 for termination \0
@@ -146,6 +171,12 @@ void XbeeAPI::poll()
         break;
       }
 
+    }
+
+    if(message != NULL && message->hasTerminated()){
+      return true;
+    }else{
+      return false;
     }
 }
 
@@ -192,7 +223,8 @@ bool XbeeAPI::validatePacket(unsigned char* packet){
           strcpy(str, "HB#:");
           strcat(str, name);
           strcat(str, "!");
-          sendMessage((unsigned char*)str);
+          sendMessage(str);
+          delete message;
         }
         
 
@@ -253,6 +285,8 @@ unsigned char XbeeAPI::escape(unsigned char* packet, unsigned char* output)
 {
   
   unsigned char len = packet[2];
+  serial->print("Len: ");
+  serial->println(len);
   unsigned char pos = 1;
 
   output[0] = 0x7E;
@@ -270,7 +304,8 @@ unsigned char XbeeAPI::escape(unsigned char* packet, unsigned char* output)
           break;
     }
   }
-
+  serial->print("pos: ");
+  serial->println(pos+1);
   return pos+1;
 
 }

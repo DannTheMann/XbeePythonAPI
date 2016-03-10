@@ -12,7 +12,7 @@ class XbeeAPI
   public:
   	// public methods
     XbeeAPI(HardwareSerial * serialPort, int pin, const char* name);
-    uint8_t sendMessage(unsigned char* message);
+    uint8_t sendMessage(char* message);
     bool responseReady();
     unsigned char* getResponse();
   private:
