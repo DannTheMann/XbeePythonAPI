@@ -10,18 +10,18 @@
 * XbeeAPI
 */
 
-XbeeAPI::XbeeAPI(Serial serial, int pin, unsigned char* node)
+XbeeAPI::XbeeAPI(HardwareSerial *pserial, int pin, const char* name) : name(name)
 {
-  serial.begin(9600);
-  serial.setTimeout(1000);
-  name = node;
+  serial = pserial;
+  serial->begin(9600);
+  serial->setTimeout(1000);
 }
 
 #define MAX_TRANSMIT_RF_DATA 72
 
 uint8_t XbeeAPI::sendMessage(unsigned char* message)
 {
-   int len = strlen(message);
+   int len = strlen((char*)message);
    unsigned char framesNeeded = len / 72;
    if ( len > 72 && len < 144){
       framesNeeded++;
@@ -33,20 +33,20 @@ uint8_t XbeeAPI::sendMessage(unsigned char* message)
       return 3; // Too large a message
    }
 
-   char frame[150];
-   char escapedFrame[200];
+   unsigned char frame[150];
+   unsigned char escapedFrame[200];
 
    for (int i = 0; i < framesNeeded; i++){
 
-      int escapedLen = produceFrame(escapedFrame, frame, message, len);
+      int escapedLen = produceFrame(escapedFrame, frame, message, len, i);
 
-      serial.write(escapedFrame, escapedLen);
+      serial->write(escapedFrame, escapedLen);
       // Clear both char arrays with 0's
       memset(frame, 0, 150);
       memset(escapedFrame, 0, 200);
       delay(250);
 
-      if (status != NULL && status.wasSuccessful())
+      if (txstatus != NULL && txstatus->wasSuccessful())
         continue;
       else{
         i--;
@@ -64,10 +64,10 @@ bool XbeeAPI::responseReady()
 
 unsigned char* XbeeAPI::getResponse()
 {
-  return message.getPayload;
+  return message->getPayload();
 }
 
-int XbeeAPI::produceFrame(unsigned char* escapedFrame, unsigned char* frame, unsigned char* message, int len)
+int XbeeAPI::produceFrame(unsigned char* escapedFrame, unsigned char* frame, unsigned char* message, int len, int id)
 {
 
       frame[0] = 0x7E; // Starting delimiter
@@ -90,8 +90,8 @@ int XbeeAPI::produceFrame(unsigned char* escapedFrame, unsigned char* frame, uns
       // Options
       frame[15] = 0x00;
       // RF Data
-      frame[16] = i; // Unique Frame ID
-      int length = (i+1) * MAX_TRANSMIT_RF_DATA;
+      frame[16] = id; // Unique Frame ID
+      int length = (id+1) * MAX_TRANSMIT_RF_DATA;
       bool final = false;
       if(length >= len){
         final = true;
@@ -99,7 +99,7 @@ int XbeeAPI::produceFrame(unsigned char* escapedFrame, unsigned char* frame, uns
       }
 
       int k = 17;
-      for(int j = i * MAX_TRANSMIT_RF_DATA; j < length; j++){
+      for(int j = id * MAX_TRANSMIT_RF_DATA; j < length; j++){
           frame[k++] = message[j];
       }
 
@@ -123,17 +123,18 @@ void XbeeAPI::poll()
 {
 
     unsigned char input[INPUT_SIZE + 1]; // Total length of data expected, including + 1 for termination \0
-    delay(250)
-    byte size = Serial.readBytes(input, INPUT_SIZE);
+    delay(250);
+    uint8_t size = serial->readBytes(input, INPUT_SIZE);
     input[size] = 0; // Final termination of array \0
 
-    unsigned char* packet = strtok(input, 0x7E);
+    const char *delim = "\x7E";
+    unsigned char* packet = (unsigned char*)strtok((char*)input, delim);
 
 
     while(packet != 0){
 
       if (validatePacket(packet)){
-        packet = strtok(input, 0x7E);
+        packet = (unsigned char*)strtok((char*)input, delim);
       }else{
         for(int i = 0; i < INPUT_SIZE; i++){
           if(packet[i] == 0){
@@ -158,7 +159,7 @@ bool XbeeAPI::validatePacket(unsigned char* packet){
         return false;
 
       unsigned char len = output[1];
-      unsigned char actualLen = strlen(output);
+      unsigned char actualLen = strlen((char*)output);
 
       if(len != actualLen-3)
         return false;
@@ -170,7 +171,7 @@ bool XbeeAPI::validatePacket(unsigned char* packet){
         calculatedCheckSum+=output[i];
       }
 
-      if(checksum != 0xFF){
+      if(checkSum != 0xFF){
         return false;
       }
 
@@ -178,22 +179,28 @@ bool XbeeAPI::validatePacket(unsigned char* packet){
 
       if(frameType == 0x10){ // RxPacket
 
-        if(message == null || message.hasTerminated()){      
-          message = new Message();
+        if(message == NULL || message->hasTerminated()){
+          if(message != NULL){
+            delete message;
+          }
+          message = new RxMessage();
         }
-        unsigned char response = message.appendPayload(output);
+        unsigned char response = message->appendPayload(output);
 
         if(response == 1){
           char str[20];
           strcpy(str, "HB#:");
           strcat(str, name);
           strcat(str, "!");
-          sendMessage(str);
+          sendMessage((unsigned char*)str);
         }
         
 
       }else if(frameType == 0x8B) {// TxStatus packet
-        status = new TxStatus(output);
+        if(txstatus != NULL){
+          delete txstatus;
+        }
+        txstatus = new TxStatus(output);
       }else{
         return false; // Invalid packet
       }
@@ -242,7 +249,7 @@ void XbeeAPI::unescape(unsigned char* packet, unsigned char* output)
 
 }
 
-void XbeeAPI::escape(unsigned char* packet, unsigned char* output)
+unsigned char XbeeAPI::escape(unsigned char* packet, unsigned char* output)
 {
   
   unsigned char len = packet[2];
@@ -272,17 +279,17 @@ void XbeeAPI::escape(unsigned char* packet, unsigned char* output)
 /*
 * TxStatus
 */
-TxStatus::TxStatus(unsigned char* packet)
+XbeeAPI::TxStatus::TxStatus(unsigned char* packet)
 {
   delivery = packet[7];
 }
 
-bool TxStatus::wasSuccessful()
+bool XbeeAPI::TxStatus::wasSuccessful()
 {
   return getDeliveryStatus();
 }
 
-uint8_t TxStatus::getDeliveryStatus()
+uint8_t XbeeAPI::TxStatus::getDeliveryStatus()
 {
   return delivery == 0;
 }
@@ -290,23 +297,24 @@ uint8_t TxStatus::getDeliveryStatus()
 /*
 * RxMessage
 */
-#define PACKET_SIZE = 300
+#define PACKET_SIZE 300
 
-RxMessage::RxMessage(unsigned char* packet)
+XbeeAPI::RxMessage::RxMessage()
 {
   payload[PACKET_SIZE];
   terminated = false;
 }
 
-bool RxMessage::hasTerminated()
+bool XbeeAPI::RxMessage::hasTerminated()
 {
   return terminated;
 }
 
-unsigned char RxMessage::appendPayload(unsigned char* packet)
+unsigned char XbeeAPI::RxMessage::appendPayload(unsigned char* packet)
 {
-  if(terminated)
-    return;
+  if(terminated){
+    return 0x00;
+  }
 
   unsigned char len = packet[1]-13;
 
@@ -320,10 +328,11 @@ unsigned char RxMessage::appendPayload(unsigned char* packet)
     }
     temp[pos] = packet[i]; 
   }
-  strncpy(payload, temp, len);
+  strncpy((char*)payload, temp, len);
 
   if(terminated){
-    if(strstr(payload, "HB#:!")){
+    //const char* heartbeat = "HB#:!";
+    if(strstr((char*)payload,"HB#:!")) {
       return 1;
     }
   }else{
@@ -332,10 +341,10 @@ unsigned char RxMessage::appendPayload(unsigned char* packet)
 
 }
 
-unsigned char* RxMessage::getPayload()
+unsigned char* XbeeAPI::RxMessage::getPayload()
 {
   if(terminated)
-    return *payload;
+    return payload;
   else
     return 0;
 }

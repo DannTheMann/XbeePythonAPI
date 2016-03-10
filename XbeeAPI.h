@@ -4,29 +4,27 @@
 #ifndef XbeeAPI_h
 #define XbeeAPI_h
 
-#include "Arduino.h"
+#include <Arduino.h>
+#include <HardwareSerial.h>
 
 class XbeeAPI
 {
   public:
   	// public methods
-    XbeeAPI(Serial serialPort, int pin, unsigned char* name);
-    uint8_t sendMessage();
+    XbeeAPI(HardwareSerial * serialPort, int pin, const char* name);
+    uint8_t sendMessage(unsigned char* message);
     bool responseReady();
-    String getResponse();
+    unsigned char* getResponse();
   private:
   	// Private methods
-  	int produceFrame();
+  	int produceFrame(unsigned char* escapedFrame, unsigned char* frame, unsigned char* message, int len, int id);
   	void poll();
-  	bool validatePacket(char* packet);
-  	void escape(char* packet);
-  	void unescape(char* packet);
+  	bool validatePacket(unsigned char* packet);
+  	unsigned char escape(unsigned char* packet, unsigned char* output);
+  	void unescape(unsigned char* packet, unsigned char* output);
 
   	// Fields
-  	RxMessage message;
-  	TxStatus txstatus;
-  	Serial serial;
-    unsigned char* name;
+    public:
   	class TxStatus
   	{
   	public:
@@ -36,6 +34,8 @@ class XbeeAPI
    	private:
    		uint8_t delivery;
   	};
+
+    public:
   	class RxMessage
   	{
   	public:
@@ -46,8 +46,14 @@ class XbeeAPI
   	private:
   		uint8_t frameID;
   		bool terminated;
-  		char[] payload; 
+  		unsigned char *payload; 
     };
+
+  private:
+    RxMessage *message;
+    TxStatus *txstatus;
+    HardwareSerial *serial;
+    const char* name;
   	
 };
 
