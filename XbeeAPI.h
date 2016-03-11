@@ -17,8 +17,8 @@ class XbeeAPI
     unsigned char* getResponse();
   private:
   	// Private methods
-  	int produceFrame(unsigned char* escapedFrame, unsigned char* frame, unsigned char* message, int len, int id);
-  	void poll();
+  	int produceFrame(unsigned char* escapedFrame, unsigned char* frame, unsigned char* message, int len, int id, unsigned char framesNeeded);
+  	bool poll();
   	bool validatePacket(unsigned char* packet);
   	unsigned char escape(unsigned char* packet, unsigned char* output);
   	void unescape(unsigned char* packet, unsigned char* output);
