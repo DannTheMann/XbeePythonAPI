@@ -14,7 +14,7 @@ XbeeAPI::XbeeAPI(HardwareSerial *pserial, int pin, const char* name) : name(name
 {
   serial = pserial;
   //serial->begin(9600);
-  serial->println("Hello...");
+  //serial->println("Hello...");
   serial->setTimeout(1000);
 }
 
@@ -22,59 +22,60 @@ XbeeAPI::XbeeAPI(HardwareSerial *pserial, int pin, const char* name) : name(name
 
 uint8_t XbeeAPI::sendMessage(char* message)
 {
-   serial->print("Sending: ");
-   serial->println(message);
+   //serial->print("Sending: ");
+   //serial->println(message);
 
    int len = strlen(message);
-   unsigned char framesNeeded = len / 72;
-   if ( len > 72 && len < 144){
-      framesNeeded++;
-   }else if(len > 0 && len < 72){
-      framesNeeded = 1;
-   }
+   float framesNeededDivision = (len / 72.0f)+0.5f;
+   unsigned char framesNeeded = (unsigned char)round(framesNeededDivision);
 
    if(framesNeeded > 255){
       return 3; // Too large a message
    }
 
-   serial->print("Len:");
-   serial->print(len);
-   serial->print(" FramesNeeded: ");
-   serial->println(framesNeeded);
+   //serial->print("Len:");
+   //serial->print(len);
+   //serial->print(" FramesNeeded: ");
+   //serial->println(framesNeeded);
 
    unsigned char frame[150];
    unsigned char escapedFrame[200];
 
    for (int i = 0; i < framesNeeded; i++){
 
-      serial->print("Producing frame... ");
-      serial->println(i);
+      //serial->print("Producing frame... ");
+      //serial->println(i);
       int escapedLen = produceFrame(escapedFrame, frame, (unsigned char*)message, len, i, framesNeeded);
 
-      serial->print("Printing escaped frame... ");
-      serial->println(escapedLen);
+      //serial->print("Printing escaped frame... ");
+      //serial->println(escapedLen);
 	  
-	  serial->println("");
-	  serial->print("'");
-	  for(int i = 0; i < escapedLen; i++){
-		  serial->print(escapedFrame[i]);
-		  serial->print(" ");
-	  }
-	  serial->println("'");
-	  serial->println("");
+	  //serial->println("");
+	  //serial->print("'");
+	  
+	  //serial->println("'");
+	  //serial->println("");
       serial->write(escapedFrame, escapedLen);
-	  serial->println("");
+	  
+	  //for(int i = 0; i < escapedLen; i++){
+		 // serial->print(escapedFrame[i], HEX);
+		  //serial->print(" ");
+	  //}
+	  //serial->print('\n');
+	  
+	  //serial->println("");
       // Clear both char arrays with 0's
       memset(frame, 0, 150);
       memset(escapedFrame, 0, 200);
+	  poll();
       delay(250);
 
-      //if (txstatus != NULL && txstatus->wasSuccessful())
-      //  continue;
-      //else{
-      //  i--;
-      //  continue;
-      //}
+     /// if (txstatus != NULL && txstatus->wasSuccessful())
+     //   continue;
+     // else{
+     //   i--;
+     //   continue;
+     // }
 
    }
 
@@ -119,7 +120,7 @@ int XbeeAPI::produceFrame(unsigned char* escapedFrame, unsigned char* frame, uns
       int length = (id+1)*MAX_TRANSMIT_RF_DATA;
       //bool final = false;
       if(framesNeeded == (id+1)){
-		serial->println("Final frame.");
+		//serial->println("Final frame.");
         //final = true;
         frame[2] = len-(id * MAX_TRANSMIT_RF_DATA)+15;
 		length = len;
@@ -127,30 +128,30 @@ int XbeeAPI::produceFrame(unsigned char* escapedFrame, unsigned char* frame, uns
 		frame[2] = MAX_TRANSMIT_RF_DATA+15;  
 	  }
 	  
-	  serial->print("Len: ");
-	  serial->println(length);
-	  serial->print("FramesNeeded: ");
-	  serial->println(framesNeeded);
-	  serial->print("ID: ");
-	  serial->println(id);
+	  //serial->print("Len: ");
+	  //serial->println(length);
+	  //serial->print("FramesNeeded: ");
+	  //serial->println(framesNeeded);
+	  //serial->print("ID: ");
+	  //serial->println(id);
 
       int k = 18;
 	  int j = id * MAX_TRANSMIT_RF_DATA;
-	  serial->print("J: ");
-	  serial->println(j);
+	  //serial->print("J: ");
+	  //serial->println(j);
       for(; j < length; j++){
           frame[k++] = message[j];
           if(j == len-1 && framesNeeded == id+1){ //j == len-1
-			serial->println("Final: !");
+			//serial->println("Final: !");
             frame[2]++;
             frame[k++] = '!';
             break;
           }
       }
-	  serial->print("K: ");
-	  serial->println(k);
-	  serial->print("J: ");
-	  serial->println(j);
+	  //serial->print("K(AFTER): ");
+	  //serial->println(k);
+	  //serial->print("J(AFTER): ");
+	  //serial->println(j);
       // if(final){
       //   frame[k++] = '!';
       // }
@@ -161,8 +162,8 @@ int XbeeAPI::produceFrame(unsigned char* escapedFrame, unsigned char* frame, uns
       }
 	  checksum = 0xFF-checksum;
       frame[k] = checksum;
-      serial->print("Checksum: ");
-      serial->println(checksum);
+      //serial->print("Checksum: ");
+      //serial->println(checksum);
 
       return escape(frame, escapedFrame);
   
@@ -311,8 +312,8 @@ unsigned char XbeeAPI::escape(unsigned char* packet, unsigned char* output)
 {
   
   unsigned char len = packet[2];
-  serial->print("ESCAPE(LEN): ");
-  serial->println(len);
+  //serial->print("ESCAPE(LEN): ");
+  //serial->println(len);
   unsigned char pos = 1;
 
   output[0] = 0x7E;
@@ -330,8 +331,8 @@ unsigned char XbeeAPI::escape(unsigned char* packet, unsigned char* output)
           break;
     }
   }
-  serial->print("pos: ");
-  serial->println(pos);
+  //serial->print("pos: ");
+  //serial->println(pos);
   return pos;
 
 }
