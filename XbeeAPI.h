@@ -4,50 +4,58 @@
 #ifndef XbeeAPI_h
 #define XbeeAPI_h
 
-#include "Arduino.h"
+#include <Arduino.h>
+#include <HardwareSerial.h>
 
 class XbeeAPI
 {
   public:
   	// public methods
-    XbeeAPI(Serial serialPort);
-    uint8_t sendMessage();
+    XbeeAPI(HardwareSerial * serialPort, int pin, const char* name);
+    uint8_t sendMessage(char* message);
     bool responseReady();
-    String getResponse();
+    bool poll(uint8_t timesToPoll);
+    unsigned char* getResponse();
   private:
   	// Private methods
-  	uint8_t produceFrame();
-  	uint8_t onSerialEvent();
-  	bool validatePacket(char* packet);
-  	void escape(char* packet);
-  	void unescape(char* packet);
+  	int produceFrame(unsigned char* escapedFrame, unsigned char* frame, unsigned char* message, int len, int id, unsigned char framesNeeded);
+  	bool validatePacket(unsigned char* packet);
+  	unsigned char escape(unsigned char* packet, unsigned char* output);
+  	unsigned char unescape(unsigned char* packet, unsigned char* output);
 
   	// Fields
-  	RxMessage message;
-  	TxStatus txstatus;
-  	Serial serial;
+    public:
   	class TxStatus
   	{
   	public:
-  		TxStatus(String packet);
+  		TxStatus(unsigned char* packet);
   		bool wasSuccessful();
   		uint8_t  getDeliveryStatus();
    	private:
    		uint8_t delivery;
-  	}
+  	};
+
+    public:
   	class RxMessage
   	{
   	public:
-  		RxMessage(String packet);
+  		RxMessage();
   		bool hasTerminated();
-  		void appendPayload(String packet);
-  		String getPayload();
+  		unsigned char appendPayload(unsigned char* packet);
+  		unsigned char* getPayload();
+      uint8_t length();
   	private:
-  		uint8_t frameID;
+  		uint8_t packetLength;
   		bool terminated;
-  		char[] payload; 
+  		unsigned char *payload; 
+    };
 
-  	}
+  private:
+    RxMessage *message;
+    TxStatus *txstatus;
+    HardwareSerial *serial;
+    const char* name;
+  	
 };
 
 #endif
