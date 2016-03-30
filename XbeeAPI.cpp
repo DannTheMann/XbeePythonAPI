@@ -13,71 +13,80 @@
 XbeeAPI::XbeeAPI(HardwareSerial *pserial, int pin, const char* name) : name(name)
 {
   serial = pserial;
-  //serial->begin(9600);
-  //serial->println("Hello...");
+  serial->begin(9600);
   serial->setTimeout(1000);
 }
 
-#define MAX_TRANSMIT_RF_DATA 72
+#define MAX_TRANSMIT_RF_DATA 72 // MTU = 72 bytes
+#define MAX_TRANSMISSION_ATTEMPTS 2
 
+/**
+*
+* Fragments and sends a message to the coordinator
+* Will return different ints based on results
+* 0 = successful transmission
+* 1 = failed on exceeding max retransmission attempts
+* 2 = unknown error occurred 
+* 3 = message exceeds fragmentation MTU limit
+*/
 uint8_t XbeeAPI::sendMessage(char* message)
 {
-   //serial->print("Sending: ");
-   //serial->println(message);
 
-   int len = strlen(message);
-   float framesNeededDivision = (len / 72.0f)+0.5f;
-   unsigned char framesNeeded = (unsigned char)round(framesNeededDivision);
+   int len = strlen(message); // Len of message to send
+   float framesNeededDivision = (len / 72.0f); // Work out the amount of frames required
+   unsigned char framesNeeded = (unsigned char)ceil(framesNeededDivision); // smallest integral value not less than x
 
+   // We can only send a maximum of 255 frames
    if(framesNeeded > 255){
       return 3; // Too large a message
    }
 
-   //serial->print("Len:");
-   //serial->print(len);
-   //serial->print(" FramesNeeded: ");
-   //serial->println(framesNeeded);
 
+   // Internal buffer can store 202 bytes
+   // Max payload is around 72 bytes for RF data
    unsigned char frame[150];
    unsigned char escapedFrame[200];
+   unsigned char attempts = 0; // Total attempts made sending this frame
 
    for (int i = 0; i < framesNeeded; i++){
 
-      //serial->print("Producing frame... ");
-      //serial->println(i);
+      if(txstatus != NULL){
+        delete txstatus;
+      }
+
+      // returns the length of the escaped frame
       int escapedLen = produceFrame(escapedFrame, frame, (unsigned char*)message, len, i, framesNeeded);
 
-      //serial->print("Printing escaped frame... ");
-      //serial->println(escapedLen);
-	  
-	  //serial->println("");
-	  //serial->print("'");
-	  
-	  //serial->println("'");
-	  //serial->println("");
+      // Write out the contents of the array up to the length
       serial->write(escapedFrame, escapedLen);
-	  
-	  //for(int i = 0; i < escapedLen; i++){
-		 // serial->print(escapedFrame[i], HEX);
-		  //serial->print(" ");
-	  //}
-	  //serial->print('\n');
-	  
-	  //serial->println("");
+
       // Clear both char arrays with 0's
       memset(frame, 0, 150);
       memset(escapedFrame, 0, 200);
-	  poll();
-      delay(250);
+	    poll(2);
+      //delay(250);
 
-     /// if (txstatus != NULL && txstatus->wasSuccessful())
-     //   continue;
-     // else{
-     //   i--;
-     //   continue;
-     // }
+      // Checks whether the frame was received
+      if (txstatus != NULL && txstatus->wasSuccessful()){
+        attempts = 0;
+        continue;
+
+      // We reattempt sending the frame
+      }else{
+        i--;
+        attempts++;
+
+        // If we've tried x amount of times, report back error 1
+        if(attempts >= MAX_TRANSMISSION_ATTEMPTS){
+          return 1;
+        }
+        continue;
+     }
 
    }
+
+   // Returns whether the last frame was sent successfully
+   return (txstatus != NULL && txstatus->wasSuccessful()) ? 0 : 2;
 
  }
 
@@ -86,11 +95,18 @@ bool XbeeAPI::responseReady()
   return true;
 }
 
+/*
+* Returns the message payload as unsigned char*
+*/
 unsigned char* XbeeAPI::getResponse()
 {
   return message->getPayload();
 }
 
+/**
+* Produces the entire frame, including in escaped form
+* returns the length of the escaped frame
+*/
 int XbeeAPI::produceFrame(unsigned char* escapedFrame, unsigned char* frame, unsigned char* message, int len, int id, unsigned char framesNeeded)
 {
 
@@ -113,57 +129,39 @@ int XbeeAPI::produceFrame(unsigned char* escapedFrame, unsigned char* frame, uns
       frame[14] = 0xFE;
       // Options
       frame[15] = 0x00;
-	  //Broadcast Range
-	  frame[16] = 0x00;
-	  // RF Data
+  	  //Broadcast Range
+  	  frame[16] = 0x00;
+  	  // RF Data
       frame[17] = id +'0'; // Unique Frame ID
       int length = (id+1)*MAX_TRANSMIT_RF_DATA;
       //bool final = false;
       if(framesNeeded == (id+1)){
-		//serial->println("Final frame.");
         //final = true;
         frame[2] = len-(id * MAX_TRANSMIT_RF_DATA)+15;
-		length = len;
+		    length = len;
       }else{
-		frame[2] = MAX_TRANSMIT_RF_DATA+15;  
-	  }
-	  
-	  //serial->print("Len: ");
-	  //serial->println(length);
-	  //serial->print("FramesNeeded: ");
-	  //serial->println(framesNeeded);
-	  //serial->print("ID: ");
-	  //serial->println(id);
+		    frame[2] = MAX_TRANSMIT_RF_DATA+15;  
+	    } 
 
-      int k = 18;
-	  int j = id * MAX_TRANSMIT_RF_DATA;
-	  //serial->print("J: ");
-	  //serial->println(j);
-      for(; j < length; j++){
-          frame[k++] = message[j];
-          if(j == len-1 && framesNeeded == id+1){ //j == len-1
-			//serial->println("Final: !");
-            frame[2]++;
-            frame[k++] = '!';
-            break;
-          }
-      }
-	  //serial->print("K(AFTER): ");
-	  //serial->println(k);
-	  //serial->print("J(AFTER): ");
-	  //serial->println(j);
-      // if(final){
-      //   frame[k++] = '!';
-      // }
+      int k = 18; // Offset in packet for RF data
+  	  int j = id * MAX_TRANSMIT_RF_DATA; // Work out which part of the message we're extracting
+        for(; j < length; j++){
+            frame[k++] = message[j];
+            // If this is the final message, append '!' to signify final frame
+            if(j == len-1 && framesNeeded == id+1){ //j == len-1
+              frame[2]++;
+              frame[k++] = '!';
+              break;
+            }
+        }
 	  
       unsigned char checksum = 0;
       for(int i = 3; i < k; i++){ 
           checksum+=frame[i];
       }
-	  checksum = 0xFF-checksum;
+      // Checksum equals 0xFF - sum += offset 3 onwards
+	    checksum = 0xFF-checksum;
       frame[k] = checksum;
-      //serial->print("Checksum: ");
-      //serial->println(checksum);
 
       return escape(frame, escapedFrame);
   
@@ -171,69 +169,94 @@ int XbeeAPI::produceFrame(unsigned char* escapedFrame, unsigned char* frame, uns
 
 #define INPUT_SIZE 200
 
-bool XbeeAPI::poll()
+bool XbeeAPI::poll(uint8_t timesToPoll)
 {
 
     unsigned char input[INPUT_SIZE + 1]; // Total length of data expected, including + 1 for termination \0
-    delay(250);
-    uint8_t size = serial->readBytes(input, INPUT_SIZE);
-    input[size] = 0; // Final termination of array \0
+    unsigned char packet[INPUT_SIZE + 1]; // Total length of data expected, including + 1 for termination \0
 
-    const char *delim = "\x7E";
-    unsigned char* packet = (unsigned char*)strtok((char*)input, delim);
+    // How many times we want to check for incoming data
+    for(int i = 0; i < timesToPoll; i++){
+
+      // Clear arrays with 0
+      memset(input, 0, INPUT_SIZE+1);
+      memset(packet, 0, INPUT_SIZE+1);
+      delay(250);
+      // Read in all data we can up to INPUT_SIZE and store in 'input'
+      uint8_t size = serial->readBytes(input, INPUT_SIZE);
+      input[size] = 0; // Final termination of array \0
 
 
-    while(packet != 0){
-
-      if (validatePacket(packet)){
-        packet = (unsigned char*)strtok((char*)input, delim);
-      }else{
-        for(int i = 0; i < INPUT_SIZE; i++){
-          if(packet[i] == 0){
-            input[i] = 0;
+      unsigned char pos = 0;
+      unsigned char checkPacket = 0;   
+      for(int i = 0; i < size; i++){
+        if(input[i] == 0x7E){
+          if(!checkPacket){
+            checkPacket = 1;
+          // If the packet is valid, we want to continue checking serial data for other packets
+          }else if (validatePacket(packet)){
+            memset(packet, 0, INPUT_SIZE); // Reset packet
+            pos = 0;
+            checkPacket++;
+          // If invalid packet and not checking packet then break 
+          }else{
             break;
           }
-          input[i] = packet[i];
         }
-        break;
+        packet[pos++] = input[i];
       }
 
-    }
+      if(checkPacket == 1){
+        validatePacket(packet);
+      }
 
-    if(message != NULL && message->hasTerminated()){
-      return true;
-    }else{
-      return false;
-    }
+      if(message != NULL && message->hasTerminated()){
+        return true;
+      }else{
+        return false;
+      }
+  }
 }
 
+/*
+* Will verify whether the packet is in a correct format
+* and returns true or false
+*/
 bool XbeeAPI::validatePacket(unsigned char* packet){
 
       unsigned char output[INPUT_SIZE];
 
-      unescape(packet, output);
+      unsigned char outputLen = unescape(packet, output);
 
-      if(output[0] != 0x00)
+      // First two bytes are guaranteed to be these
+      // If they are not, invalid packet
+      if(output[0] != 0x7E || output[1] != 0x00){
         return false;
+      }
 
-      unsigned char len = output[1];
-      unsigned char actualLen = strlen((char*)output);
+      // Work out the length of the payload from the packet
+      unsigned char len = output[2];
 
-      if(len != actualLen-3)
+
+      // The length calculated from the unescape method
+      // vs len from packet
+      if(len != outputLen-3){
         return false;
+      }
 
-      unsigned char checkSum = output[len-1];
+      unsigned char checkSum = output[outputLen];
       unsigned char calculatedCheckSum = 0;
-      len+=2;
-      for(int i=2;i<len;i++){
+      for(int i=3;i<outputLen-1;i++){
         calculatedCheckSum+=output[i];
       }
 
-      if(checkSum != 0xFF){
+      calculatedCheckSum = 0xFF - calculatedCheckSum;
+
+      if(checkSum != calculatedCheckSum){
         return false;
       }
 
-      unsigned char frameType = output[2];
+      unsigned char frameType = output[3];
 
       if(frameType == 0x10){ // RxPacket
 
@@ -244,7 +267,10 @@ bool XbeeAPI::validatePacket(unsigned char* packet){
           message = new RxMessage();
         }
         unsigned char response = message->appendPayload(output);
+        unsigned char* mes = message->getPayload();
 
+        // Whether this was a heartbeat request
+        // If so, respond and let the Hub know identity of device
         if(response == 1){
           char str[20];
           strcpy(str, "HB#:");
@@ -261,6 +287,7 @@ bool XbeeAPI::validatePacket(unsigned char* packet){
         }
         txstatus = new TxStatus(output);
       }else{
+        //serial->println(frameType, HEX);
         return false; // Invalid packet
       }
 
@@ -268,22 +295,23 @@ bool XbeeAPI::validatePacket(unsigned char* packet){
 
 }
 
-void XbeeAPI::unescape(unsigned char* packet, unsigned char* output)
+unsigned char XbeeAPI::unescape(unsigned char* packet, unsigned char* output)
 {
 
   unsigned char len = INPUT_SIZE; // Worst case scenario, we know the maximum size of the array
   unsigned char index = 1;
-  unsigned char out = 1;
+  unsigned char out = 3;
   output[0] = packet[0];
 
   if ( packet[1] == 0x7D) {// The length has been escaped, so we need unescape and determine it
-      len = packet[2] ^ 0x20; // Get the original length 
-      index = 3;
+      len = packet[3] ^ 0x20; // Get the original length 
+      index = 4;
   }else{
-      len = packet[1];
-      index = 2;
+      len = packet[2];
+      index = 3;
   }
-  output[1] = len; 
+  output[1] = 0x00;
+  output[2] = len; 
 
   len += index+1; // account for the previous bytes before the payload as well as checksum
   bool skip = false;
@@ -306,18 +334,20 @@ void XbeeAPI::unescape(unsigned char* packet, unsigned char* output)
 
   }
 
+  return out-1;
+
 }
 
 unsigned char XbeeAPI::escape(unsigned char* packet, unsigned char* output)
 {
   
   unsigned char len = packet[2];
-  //serial->print("ESCAPE(LEN): ");
-  //serial->println(len);
   unsigned char pos = 1;
 
   output[0] = 0x7E;
+  // For every byte in frame
   for(int i = 1; i < (len+4); i++){
+    // if byte equals the following escape it
     switch(packet[i]){
       case 0x7D:
       case 0x7E:
@@ -331,8 +361,7 @@ unsigned char XbeeAPI::escape(unsigned char* packet, unsigned char* output)
           break;
     }
   }
-  //serial->print("pos: ");
-  //serial->println(pos);
+  // return length of escaped frame
   return pos;
 
 }
@@ -346,14 +375,16 @@ XbeeAPI::TxStatus::TxStatus(unsigned char* packet)
   delivery = packet[7];
 }
 
+// Returns true if delivery was successful
 bool XbeeAPI::TxStatus::wasSuccessful()
 {
   return getDeliveryStatus();
 }
 
+// Returns value of delivery status
 uint8_t XbeeAPI::TxStatus::getDeliveryStatus()
 {
-  return delivery == 0;
+  return delivery;
 }
 
 /*
@@ -365,23 +396,35 @@ XbeeAPI::RxMessage::RxMessage()
 {
   payload[PACKET_SIZE];
   terminated = false;
+  packetLength = 0;
 }
 
+// Returns true if packet has been assembled
 bool XbeeAPI::RxMessage::hasTerminated()
 {
   return terminated;
 }
 
+// Returns length of packet
+uint8_t XbeeAPI::RxMessage::length()
+{
+  return packetLength;
+}
+
+// Append to existing message contents
 unsigned char XbeeAPI::RxMessage::appendPayload(unsigned char* packet)
 {
   if(terminated){
+    // Don't add to payload if the message has terminated
     return 0x00;
   }
 
+  // Work out length of frame and how much to append by
   unsigned char len = packet[1]-13;
 
   char temp[len];
   int pos = 0;
+  // Append to existing message
   for(int i = 16; i < packet[1]; i++){
     if(packet[pos] == '!'){
       terminated = true;
@@ -391,6 +434,8 @@ unsigned char XbeeAPI::RxMessage::appendPayload(unsigned char* packet)
     temp[pos] = packet[i]; 
   }
   strncpy((char*)payload, temp, len);
+
+  packetLength += len;
 
   if(terminated){
     //const char* heartbeat = "HB#:!";
@@ -403,6 +448,7 @@ unsigned char XbeeAPI::RxMessage::appendPayload(unsigned char* packet)
 
 }
 
+// Returns payload
 unsigned char* XbeeAPI::RxMessage::getPayload()
 {
   if(terminated)
